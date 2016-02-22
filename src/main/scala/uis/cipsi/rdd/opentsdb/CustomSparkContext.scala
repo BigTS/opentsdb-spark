@@ -16,16 +16,16 @@ import scala.reflect.io.Path.string2path
 object CustomSparkContext {
   def create(sparkMaster:String = "local",
       zookeeperQuorum:String = "localhost",
-      zookeeperClientPort:String = "2181", cores:String ="2", memory:String ="512m", driverHost: String, driverPort:String): SparkContext = {
+      zookeeperClientPort:String = "2181", cores:String ="2", memory:String ="512m"): SparkContext = {
+    println("Creating Spark Context ....")
+
     //creating spark context
     val sparkConf = new SparkConf()
     sparkConf.setAppName("SaferAnalytics")
     sparkConf.setMaster(sparkMaster)
     sparkConf.set("spark.cores.max", cores)
     sparkConf.set("spark.executor.memory", memory)
-    sparkConf.set("spark.driver.host", driverHost)
-    sparkConf.set("spark.driver.port", driverPort)    
-        
+
     if (!SparkContext.jarOfClass(this.getClass).isEmpty) {
       //If we run from eclipse, this statement doesnt work!! Therefore the else part
       sparkConf.setJars(SparkContext.jarOfClass(this.getClass).toSeq)
@@ -36,10 +36,8 @@ object CustomSparkContext {
       jar.create(File("/tmp/opentsdb-spark.jar"), Directory(sourceDir), "opentsdb-spark")      
       sparkConf.setJars(Seq("/tmp/opentsdb-spark.jar"))
     }
-   println(sparkMaster)
+    println(sparkMaster)
     val sc = new SparkContext(sparkConf)
-     println("heres")
-     System.exit(1)
     sc
   }
 
