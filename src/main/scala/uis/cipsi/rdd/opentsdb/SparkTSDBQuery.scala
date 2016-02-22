@@ -48,14 +48,11 @@ class SparkTSDBQuery(sMaster: String, zkQuorum: String, zkClientPort: String) {
       config.set("net.opentsdb.tagkv", bytes2hex(tagkv.get, "\\x"))
     }
     
-    val stDateBuffer = ByteBuffer.allocate(4)
-    stDateBuffer.putInt((format_data.parse(if (startdate != None) startdate.get else "0101197001:00").getTime() / 1000).toInt)
+    val startTime = (format_data.parse(if (startdate != None) startdate.get else "0101198001:00").getTime() / 1000).toInt
+    val endTime = (format_data.parse(if (enddate != None) enddate.get else "3112209923:59").getTime() / 1000).toInt
 
-    val endDateBuffer = ByteBuffer.allocate(4)
-    endDateBuffer.putInt((format_data.parse(if (enddate != None) enddate.get else "3112209923:59").getTime() / 1000).toInt)
-
-    config.set("hbase.mapreduce.scan.timerange.start", bytes2hex(stDateBuffer.array(), "\\x"))
-    config.set("hbase.mapreduce.scan.timerange.end", bytes2hex(endDateBuffer.array(), "\\x"))
+    config.set("hbase.mapreduce.scan.timerange.start", startTime + "")
+    config.set("hbase.mapreduce.scan.timerange.end", endTime + "")
     config
   }
 
@@ -80,6 +77,8 @@ class SparkTSDBQuery(sMaster: String, zkQuorum: String, zkClientPort: String) {
   }
 
   def generateRDD(metricName: String, tagKeyValueMap: String, startdate: String, enddate: String, sc: SparkContext) = {
+    println("Generating RDD...")
+
     val metric = metricName
     var tags = if (tagKeyValueMap.trim != "*")
       tagKeyValueMap.split(",").map(_.split("->")).map(l => (l(0).trim, l(1).trim)).toMap
@@ -93,12 +92,22 @@ class SparkTSDBQuery(sMaster: String, zkQuorum: String, zkClientPort: String) {
       classOf[ImmutableBytesWritable],
       classOf[Result])
 
-    val metricsUID = tsdbUID.map(l =>
-      l._2.getValue("id".getBytes(), columnQualifiers(0).getBytes())).filter(_ != null).collect //Since we will have only one metric uid
-    val tagKUIDs = tsdbUID.map(l => (new String(l._1.copyBytes()), l._2.getValue("id".getBytes(), columnQualifiers(1).getBytes()))).filter(_._2 != null).collect.toMap
-    val tagVUIDs = tsdbUID.map(l => (new String(l._1.copyBytes()), l._2.getValue("id".getBytes(), columnQualifiers(2).getBytes()))).filter(_._2 != null).collect.toMap
+    val metricsUID = tsdbUID
+      .map(l => l._2.getValue("id".getBytes(), columnQualifiers(0).getBytes()))
+      .filter(_ != null).collect //Since we will have only one metric uid
+
+    val tagKUIDs = tsdbUID
+      .map(l => (new String(l._1.copyBytes()), l._2.getValue("id".getBytes(), columnQualifiers(1).getBytes())))
+      .filter(_._2 != null).collect.toMap
+
+    val tagVUIDs = tsdbUID
+      .map(l => (new String(l._1.copyBytes()), l._2.getValue("id".getBytes(), columnQualifiers(2).getBytes())))
+      .filter(_._2 != null).collect.toMap
+
     val tagKKeys = tagKUIDs.keys.toArray
+
     val tagVKeys = tagVUIDs.keys.toArray
+
     //If certain user supplied tags were not present 
     tags = tags.filter(kv => tagKKeys.contains(kv._1) && tagVKeys.contains(kv._2))
 
@@ -124,17 +133,17 @@ class SparkTSDBQuery(sMaster: String, zkQuorum: String, zkClientPort: String) {
           val basetime: Long = ByteBuffer.wrap(kv._1).getInt
           val iterator = kv._2.entrySet().iterator()
           val row = new ArrayBuffer[(Long, Float)]
-          var ctr = 0;
+          var ctr = 0
           while (iterator.hasNext()) {
             ctr += 1
             val next = iterator.next()
-            val a = next.getKey();
-            val b = next.getValue();
+            val a = next.getKey()
+            val b = next.getValue()
 
             def getDelta(a: Array[Byte]): Int = {
-              var key = 0;
+              var key = 0
               for (i <- 0 until a.length) {
-                val bo = (a(i) & 0XFF) << ((a.length * 8 - 8) - (i * 8));
+                val bo = (a(i) & 0XFF) << ((a.length * 8 - 8) - (i * 8))
                 key = key | bo
               }
               key
@@ -157,7 +166,7 @@ class SparkTSDBQuery(sMaster: String, zkQuorum: String, zkClientPort: String) {
 
             val bySize = if (a.length / 2 == (b.length - 1) / 4) 4 else 8
             val value: Array[Float] = if (b.length == 1) {
-              val bo = (b(0) & 0XFF) << ((b.length * 8 - 8) - (0 * 8));
+              val bo = (b(0) & 0XFF) << ((b.length * 8 - 8) - (0 * 8))
               Array(0 | bo)
             } else if (b.length == 4) Array(ByteBuffer.wrap(b).getFloat())
             else {
