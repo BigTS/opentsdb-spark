@@ -1,10 +1,14 @@
 package uis.cipsi.rdd.opentsdb
 
+import java.util
+import java.util.Map.Entry
+
 import org.apache.hadoop.hbase.HBaseConfiguration
 import org.apache.hadoop.hbase.io.ImmutableBytesWritable
 import org.apache.hadoop.hbase.client.Result
 import org.apache.spark.SparkContext
 import org.apache.hadoop.conf.Configuration
+import org.apache.spark.rdd.RDD
 import scala.collection.mutable.ArrayBuffer
 import java.util.Arrays
 import java.nio.ByteBuffer
@@ -47,7 +51,7 @@ class SparkTSDBQuery(sMaster: String, zkQuorum: String, zkClientPort: String) {
     if (tagkv != None) {
       config.set("net.opentsdb.tagkv", bytes2hex(tagkv.get, "\\x"))
     }
-    
+
     val startTime = (format_data.parse(if (startdate != None) startdate.get else "0101198001:00").getTime() / 1000).toInt
     val endTime = (format_data.parse(if (enddate != None) enddate.get else "3112209923:59").getTime() / 1000).toInt
 
@@ -83,7 +87,7 @@ class SparkTSDBQuery(sMaster: String, zkQuorum: String, zkClientPort: String) {
     var tags = if (tagKeyValueMap.trim != "*")
       tagKeyValueMap.split(",").map(_.split("->")).map(l => (l(0).trim, l(1).trim)).toMap
     else Map("dummyKey" -> "dummyValue")
-    
+
     val columnQualifiers = Array("metrics", "tagk", "tagv")
 
     val tsdbUID = sc.newAPIHadoopRDD(tsdbuidConfig(zookeeperQuorum, zookeeperClientPort,
@@ -111,70 +115,85 @@ class SparkTSDBQuery(sMaster: String, zkQuorum: String, zkClientPort: String) {
     //If certain user supplied tags were not present 
     tags = tags.filter(kv => tagKKeys.contains(kv._1) && tagVKeys.contains(kv._2))
 
-    val tagKV = tagKUIDs.filter(kv => tags.contains(kv._1)).map(k => (k._2, tagVUIDs(tags(k._1)))).map(l => (l._1 ++ l._2)).toList.sorted(Ordering.by((_: Array[Byte]).toIterable))
-    
+    val tagKV = tagKUIDs
+      .filter(kv => tags.contains(kv._1))
+      .map(k => (k._2, tagVUIDs(tags(k._1))))
+      .map(l => (l._1 ++ l._2))
+      .toList
+      .sorted(Ordering.by((_: Array[Byte]).toIterable))
+
     if (metricsUID.length == 0) {
       println("Not Found: " + (if (metricsUID.length == 0) "Metric:" + metricName))
       System.exit(1)
     }
-    
-    val tsdb = sc.newAPIHadoopRDD(tsdbConfig(zookeeperQuorum, zookeeperClientPort, metricsUID.last,
-      if (tagKV.size != 0) Option(tagKV.flatten.toArray) else None,
-      if (startdate != "*") Option(startdate) else None, if (enddate != "*") Option(enddate) else None),
+
+    val tsdb: RDD[(ImmutableBytesWritable, Result)] = sc.newAPIHadoopRDD(
+      tsdbConfig(
+        zookeeperQuorum,
+        zookeeperClientPort,
+        metricsUID.last,
+        if (tagKV.size != 0) Option(tagKV.flatten.toArray) else None,
+        if (startdate != "*") Option(startdate) else None,
+        if (enddate != "*") Option(enddate) else None
+      ),
       classOf[uis.cipsi.rdd.opentsdb.TSDBInputFormat],
       classOf[org.apache.hadoop.hbase.io.ImmutableBytesWritable],
       classOf[org.apache.hadoop.hbase.client.Result])
-      
+
     //Decoding retrieved data into RDD
-    tsdb.map(kv => (Arrays.copyOfRange(kv._1.copyBytes(), 3, 7),
-      kv._2.getFamilyMap("t".getBytes())))
+    tsdb
+      // columns from 3-7 (the base time)
+      .map(kv => (Arrays.copyOfRange(kv._1.copyBytes(), 3, 7), kv._2.getFamilyMap("t".getBytes())))
       .map({
         kv =>
           val basetime: Long = ByteBuffer.wrap(kv._1).getInt
-          val iterator = kv._2.entrySet().iterator()
+          val iterator: util.Iterator[Entry[Array[Byte], Array[Byte]]] = kv._2.entrySet().iterator()
           val row = new ArrayBuffer[(Long, Float)]
-          var ctr = 0
-          while (iterator.hasNext()) {
-            ctr += 1
-            val next = iterator.next()
-            val a = next.getKey()
-            val b = next.getValue()
 
-            def getDelta(a: Array[Byte]): Int = {
-              var key = 0
-              for (i <- 0 until a.length) {
-                val bo = (a(i) & 0XFF) << ((a.length * 8 - 8) - (i * 8))
-                key = key | bo
-              }
-              key
+          def getDelta(a: Array[Byte]): Int = {
+            var key = 0
+            for (i <- 0 until a.length) {
+              val bo = (a(i) & 0XFF) << ((a.length - 1 - i) * 8)
+              key = key | bo
             }
+            key
+          }
+
+          while (iterator.hasNext()) {
+            val next = iterator.next()
+
+            val qualifier: Array[Byte] = next.getKey()
+            val b = next.getValue()
 
             //Column Quantifiers(delta) are stored as follows:
             //if number of bytes=2: 12bit value + 4 bit flag
             //if number of bytes=4: first 4bytes flag + next 22 bytes value + last 6 bytes flag
             //if number of bytes>4: columns with compacted for the hour, with each delta having 2 bytes
             //Here we perform bitwise operation to achieve the same
-            val delta: Array[Long] = if (a.length == 2) Array(getDelta(a) >> 4)
-            else if (a.length == 4) Array((getDelta(a) << 4) >> 6)
+            val delta: Array[Long] = if (qualifier.length == 2) Array(getDelta(qualifier) >> 4)
+            else if (qualifier.length == 4) Array((getDelta(qualifier) << 4) >> 6)
             else {
               val deltaB = new ArrayBuffer[Long]()
-              for (i <- 0 until a.length by 2) {
-                deltaB += getDelta(Array(a(i), a(i + 1))) >> 4
+              for (i <- 0 until qualifier.length by 2) {
+                deltaB += getDelta(Array(qualifier(i), qualifier(i + 1))) >> 4
               }
               deltaB.toArray
             }
 
-            val bySize = if (a.length / 2 == (b.length - 1) / 4) 4 else 8
-            val value: Array[Float] = if (b.length == 1) {
-              val bo = (b(0) & 0XFF) << ((b.length * 8 - 8) - (0 * 8))
-              Array(0 | bo)
-            } else if (b.length == 4) Array(ByteBuffer.wrap(b).getFloat())
-            else {
-              val valueB = new ArrayBuffer[Float]()
-              for (i <- 0 until b.length by bySize) {
-                valueB += ByteBuffer.wrap(Arrays.copyOfRange(b, i, i + 4)).getFloat()
-              }
-              valueB.toArray
+            val bySize = if (qualifier.length / 2 == (b.length - 1) / 4) 4 else 8
+
+            val value: Array[Float] =
+              if (b.length == 1) {
+                val bo = (b(0) & 0XFF) << ((b.length * 8 - 8) - (0 * 8))
+                Array(0 | bo)
+              } else if (b.length == 4)
+                Array(ByteBuffer.wrap(b).getFloat())
+              else {
+                val valueB = new ArrayBuffer[Float]()
+                for (i <- 0 until b.length by bySize) {
+                  valueB += ByteBuffer.wrap(Arrays.copyOfRange(b, i, i + 4)).getFloat()
+                }
+                valueB.toArray
             }
 
             for (i <- 0 until delta.length)
