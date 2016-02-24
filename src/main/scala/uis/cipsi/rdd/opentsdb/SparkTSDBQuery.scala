@@ -4,8 +4,6 @@ import java.util
 import java.util.Map.Entry
 
 import org.apache.hadoop.hbase.HBaseConfiguration
-import org.apache.hadoop.hbase.io.ImmutableBytesWritable
-import org.apache.hadoop.hbase.client.Result
 import org.apache.spark.SparkContext
 import org.apache.hadoop.conf.Configuration
 import org.apache.spark.rdd.RDD
@@ -16,7 +14,7 @@ import org.apache.hadoop.hbase.client.Result
 import org.apache.hadoop.hbase.io.ImmutableBytesWritable
 import scala.Array.canBuildFrom
 
-class SparkTSDBQuery(sMaster: String, zkQuorum: String, zkClientPort: String) {
+class SparkTSDBQuery(sMaster: String, zkQuorum: String, zkClientPort: String) extends Serializable {
   private val sparkMaster = sMaster
   private val zookeeperQuorum = zkQuorum
   private val zookeeperClientPort = zkClientPort
@@ -53,7 +51,7 @@ class SparkTSDBQuery(sMaster: String, zkQuorum: String, zkClientPort: String) {
     }
 
     val startTime = (format_data.parse(if (startdate != None) startdate.get else "0101198001:00").getTime() / 1000).toInt
-    val endTime = (format_data.parse(if (enddate != None) enddate.get else "3112209923:59").getTime() / 1000).toInt
+    val endTime = (format_data.parse(if (enddate != None) enddate.get else "3112205023:59").getTime() / 1000).toInt
 
     config.set("hbase.mapreduce.scan.timerange.start", startTime + "")
     config.set("hbase.mapreduce.scan.timerange.end", endTime + "")
@@ -78,6 +76,52 @@ class SparkTSDBQuery(sMaster: String, zkQuorum: String, zkClientPort: String) {
     rtn = rtn.slice(0, rtn.length() - 1)
 
     rtn
+  }
+
+  def parseQualifier(arr: Array[Byte], startIdx: Int, endIdx: Int) = {
+    val length = endIdx - startIdx
+    var value = 0
+    for (i <- startIdx until endIdx)
+      value = value | (arr(i).toInt << ((length - 1 - i) * 8))
+    value
+  }
+
+  def is4BytesQualifier(qualifierBytes: Array[Byte]): Boolean = {
+    val firstByte = qualifierBytes(0)
+    ((firstByte >> 4) & 15) == 15 // first 4 bytes = 1111
+  }
+
+  def parseValue(valueBytes: Array[Byte], index: Int, isFloat: Boolean, valueByteLength: Int): Float = {
+    val bufferArr = ByteBuffer.wrap(Arrays.copyOfRange(valueBytes, index, index + valueByteLength))
+    if (isFloat) {
+      if (valueByteLength == 4) bufferArr.getFloat()
+      else if (valueByteLength == 8) bufferArr.getDouble().toFloat
+      else throw new IllegalArgumentException(s"Can't parse Value (isFloat:$isFloat, valueByteLength:$valueByteLength")
+    } else {
+      if (valueByteLength == 1) valueBytes(index).toFloat
+      else if (valueByteLength == 2) bufferArr.getShort.toFloat
+      else if (valueByteLength == 4) bufferArr.getInt.toFloat
+      else if (valueByteLength == 8) bufferArr.getLong.toFloat
+      else throw new IllegalArgumentException(s"Can't parse Value (isFloat:$isFloat, valueByteLength:$valueByteLength")
+    }
+  }
+
+  def parseValues(qualifierBytes: Array[Byte], valueBytes: Array[Byte], basetime: Int, step: Int, timeFunc: Int => Int,
+                  result: ArrayBuffer[(Long, Float)]) = {
+
+    var index = 0
+    for (i <- 0 until qualifierBytes.length by step) {
+      val qualifier = parseQualifier(qualifierBytes, i, step)
+
+      val timeOffset = timeFunc(qualifier)
+      val isFloat = (((qualifier >> 3) & 1) == 1)
+      val valueByteLength = (qualifier & 7) + 1
+
+      val value = parseValue(valueBytes, index, isFloat, valueByteLength)
+      result += ((basetime + timeOffset, value))
+
+      index = index + valueByteLength
+    }
   }
 
   def generateRDD(metricName: String, tagKeyValueMap: String, startdate: String, enddate: String, sc: SparkContext) = {
@@ -112,7 +156,7 @@ class SparkTSDBQuery(sMaster: String, zkQuorum: String, zkClientPort: String) {
 
     val tagVKeys = tagVUIDs.keys.toArray
 
-    //If certain user supplied tags were not present 
+    //If certain user supplied tags were not present
     tags = tags.filter(kv => tagKKeys.contains(kv._1) && tagVKeys.contains(kv._2))
 
     val tagKV = tagKUIDs
@@ -146,59 +190,42 @@ class SparkTSDBQuery(sMaster: String, zkQuorum: String, zkClientPort: String) {
       .map(kv => (Arrays.copyOfRange(kv._1.copyBytes(), 3, 7), kv._2.getFamilyMap("t".getBytes())))
       .map({
         kv =>
-          val basetime: Long = ByteBuffer.wrap(kv._1).getInt
+          val basetime: Int = ByteBuffer.wrap(kv._1).getInt
           val iterator: util.Iterator[Entry[Array[Byte], Array[Byte]]] = kv._2.entrySet().iterator()
           val row = new ArrayBuffer[(Long, Float)]
-
-          def getDelta(a: Array[Byte]): Int = {
-            var key = 0
-            for (i <- 0 until a.length) {
-              val bo = (a(i) & 0XFF) << ((a.length - 1 - i) * 8)
-              key = key | bo
-            }
-            key
-          }
 
           while (iterator.hasNext()) {
             val next = iterator.next()
 
-            val qualifier: Array[Byte] = next.getKey()
-            val b = next.getValue()
+            val qualifierBytes: Array[Byte] = next.getKey()
+            val valueBytes = next.getValue()
 
-            //Column Quantifiers(delta) are stored as follows:
-            //if number of bytes=2: 12bit value + 4 bit flag
-            //if number of bytes=4: first 4bytes flag + next 22 bytes value + last 6 bytes flag
-            //if number of bytes>4: columns with compacted for the hour, with each delta having 2 bytes
-            //Here we perform bitwise operation to achieve the same
-            val delta: Array[Long] = if (qualifier.length == 2) Array(getDelta(qualifier) >> 4)
-            else if (qualifier.length == 4) Array((getDelta(qualifier) << 4) >> 6)
-            else {
-              val deltaB = new ArrayBuffer[Long]()
-              for (i <- 0 until qualifier.length by 2) {
-                deltaB += getDelta(Array(qualifier(i), qualifier(i + 1))) >> 4
-              }
-              deltaB.toArray
+            // Column Quantifiers are stored as follows:
+            // if num of bytes=2: 12 bits (delta timestamp value in sec) + 4 bits flag
+            // if num of bytes=4: 4 bits flag(must be 1111) + 22 bits (delta timestamp value in ms) +
+            //                       2 bits reserved + 4 bits flag
+            // last 4 bits flag = (1 bit (int 0 | float 1) + 3 bits (length of value bytes - 1))
+
+            // if num of bytes>4 & even: columns with compacted for the hour, with each qualifier having 2 bytes
+            // TODO make sure that (qualifier only has 2 bytes)
+
+            // if num of bytes is odd: Annotations or Other Objects
+
+            if (qualifierBytes.length == 2) { // 2 bytes qualifier
+              parseValues(qualifierBytes, valueBytes, basetime, 2, (x => x >> 4), row)
+
+            } else if (qualifierBytes.length == 4 && is4BytesQualifier(qualifierBytes)) { // 4 bytes qualifier
+              parseValues(qualifierBytes, valueBytes, basetime, 4, (x => (x << 4) >> 10), row)
+
+            } else if (qualifierBytes.length % 2 == 0) { // compacted columns
+              parseValues(qualifierBytes, valueBytes, basetime, 2, (x => x >> 4), row)
+
+            } else {
+              // TODO (Annotations or Other Objects)
+              throw new Exception("Not Supported Yet")
             }
-
-            val bySize = if (qualifier.length / 2 == (b.length - 1) / 4) 4 else 8
-
-            val value: Array[Float] =
-              if (b.length == 1) {
-                val bo = (b(0) & 0XFF) << ((b.length * 8 - 8) - (0 * 8))
-                Array(0 | bo)
-              } else if (b.length == 4)
-                Array(ByteBuffer.wrap(b).getFloat())
-              else {
-                val valueB = new ArrayBuffer[Float]()
-                for (i <- 0 until b.length by bySize) {
-                  valueB += ByteBuffer.wrap(Arrays.copyOfRange(b, i, i + 4)).getFloat()
-                }
-                valueB.toArray
-            }
-
-            for (i <- 0 until delta.length)
-              row += ((basetime + delta(i), value(i)))
           }
+
           row
       }).flatMap(_.map(kv => (kv._1, kv._2)))
 
