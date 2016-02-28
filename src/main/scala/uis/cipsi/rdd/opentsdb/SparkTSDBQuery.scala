@@ -34,7 +34,7 @@ class SparkTSDBQuery(sMaster: String, zkQuorum: String, zkClientPort: String) ex
   def tsdbuidConfig(zookeeperQuorum: String, zookeeperClientPort: String, columnQ: Array[String]) = {
     val config = generalConfig(zookeeperQuorum, zookeeperClientPort)
     config.set("hbase.mapreduce.inputtable", "tsdb-uid")
-    config.set("net.opentsdb.tsdb.uid", columnQ.mkString("|"))
+    config.set(TSDBInputFormat.TSDB_UIDS, columnQ.mkString("|"))
     config
   }
 
@@ -50,11 +50,27 @@ class SparkTSDBQuery(sMaster: String, zkQuorum: String, zkClientPort: String) ex
       config.set("net.opentsdb.tagkv", bytes2hex(tagkv.get, "\\x"))
     }
 
-    val startTime = (format_data.parse(if (startdate != None) startdate.get else "0101198001:00").getTime() / 1000).toInt
-    val endTime = (format_data.parse(if (enddate != None) enddate.get else "3112205023:59").getTime() / 1000).toInt
 
-    config.set("hbase.mapreduce.scan.timerange.start", startTime + "")
-    config.set("hbase.mapreduce.scan.timerange.end", endTime + "")
+//    def getTime(date: String): String = {
+//      val MAX_TIMESPAN = 3600
+//      def getBaseTime(date: String): Int = {
+//        val timestamp = format_data.parse(startdate.get).getTime()
+//        val base_time = ((timestamp / 1000) - ((timestamp / 1000) % MAX_TIMESPAN)).toInt
+//        base_time
+//      }
+//
+//      val baseTime = getBaseTime(date)
+//      val x: ByteBuffer = new ByteBuffer()
+//      x.putInt(baseTime)
+//      x.array().mkString("")
+//    }
+//
+//    if (startdate != None)
+//      config.set(TSDBInputFormat.SCAN_TIMERANGE_START, getTime(startdate.get))
+//
+//    if (enddate != None)
+//      config.set(TSDBInputFormat.SCAN_TIMERANGE_END, getTime(enddate.get))
+
     config
   }
 
@@ -106,14 +122,14 @@ class SparkTSDBQuery(sMaster: String, zkQuorum: String, zkClientPort: String) ex
     }
   }
 
-  def parseValues(qualifierBytes: Array[Byte], valueBytes: Array[Byte], basetime: Int, step: Int, timeFunc: Int => Int,
+  def parseValues(qualifierBytes: Array[Byte], valueBytes: Array[Byte], basetime: Int, step: Int, getOffset: Int => Int,
                   result: ArrayBuffer[(Long, Float)]) = {
 
     var index = 0
     for (i <- 0 until qualifierBytes.length by step) {
       val qualifier = parseQualifier(qualifierBytes, i, step)
 
-      val timeOffset = timeFunc(qualifier)
+      val timeOffset = getOffset(qualifier)
       val isFloat = (((qualifier >> 3) & 1) == 1)
       val valueByteLength = (qualifier & 7) + 1
 
@@ -128,48 +144,62 @@ class SparkTSDBQuery(sMaster: String, zkQuorum: String, zkClientPort: String) ex
     println("Generating RDD...")
 
     val metric = metricName
-    var tags = if (tagKeyValueMap.trim != "*")
-      tagKeyValueMap.split(",").map(_.split("->")).map(l => (l(0).trim, l(1).trim)).toMap
-    else Map("dummyKey" -> "dummyValue")
+    val tags = if (tagKeyValueMap.trim != "*") tagKeyValueMap.split(",").map(_.split("->")).map(l => (l(0).trim, l(1).trim)).toMap
+    else Map[String, String]()
 
-    val columnQualifiers = Array("metrics", "tagk", "tagv")
-
-    val tsdbUID = sc.newAPIHadoopRDD(tsdbuidConfig(zookeeperQuorum, zookeeperClientPort,
-      Array(metric, tags.map(_._1).mkString("|"), tags.map(_._2).mkString("|"))),
+    val tsdbUID = sc.newAPIHadoopRDD(
+      tsdbuidConfig(
+        zookeeperQuorum,
+        zookeeperClientPort,
+        Array(metric, tags.map(_._1).mkString("|"), tags.map(_._2).mkString("|"))
+      ),
       classOf[uis.cipsi.rdd.opentsdb.TSDBInputFormat],
       classOf[ImmutableBytesWritable],
       classOf[Result])
 
+    println("tsdbUID: " + tsdbUID.count)
+
     val metricsUID = tsdbUID
-      .map(l => l._2.getValue("id".getBytes(), columnQualifiers(0).getBytes()))
+      .map(l => l._2.getValue("id".getBytes(), "metrics".getBytes()))
       .filter(_ != null).collect //Since we will have only one metric uid
 
-    val tagKUIDs = tsdbUID
-      .map(l => (new String(l._1.copyBytes()), l._2.getValue("id".getBytes(), columnQualifiers(1).getBytes())))
-      .filter(_._2 != null).collect.toMap
+    println("MetricsUID: ")
+    metricsUID.foreach(arr => println(arr.mkString(", ")))
 
-    val tagVUIDs = tsdbUID
-      .map(l => (new String(l._1.copyBytes()), l._2.getValue("id".getBytes(), columnQualifiers(2).getBytes())))
-      .filter(_._2 != null).collect.toMap
-
-    val tagKKeys = tagKUIDs.keys.toArray
-
-    val tagVKeys = tagVUIDs.keys.toArray
-
-    //If certain user supplied tags were not present
-    tags = tags.filter(kv => tagKKeys.contains(kv._1) && tagVKeys.contains(kv._2))
-
-    val tagKV = tagKUIDs
-      .filter(kv => tags.contains(kv._1))
-      .map(k => (k._2, tagVUIDs(tags(k._1))))
-      .map(l => (l._1 ++ l._2))
-      .toList
-      .sorted(Ordering.by((_: Array[Byte]).toIterable))
-
-    if (metricsUID.length == 0) {
+    if (metricsUID.isEmpty) {
       println("Not Found: " + (if (metricsUID.length == 0) "Metric:" + metricName))
       System.exit(1)
     }
+
+    val tagKUIDs = tsdbUID
+      .map(l => (new String(l._1.copyBytes()), l._2.getValue("id".getBytes(), "tagk".getBytes())))
+      .filter(_._2 != null).collect.toMap
+
+    println("tagKUIDs: ")
+    tagKUIDs.foreach(m => println(m._1 + " => " + m._2.mkString(", ")))
+
+    val tagVUIDs = tsdbUID
+      .map(l => (new String(l._1.copyBytes()), l._2.getValue("id".getBytes(), "tagv".getBytes())))
+      .filter(_._2 != null).collect.toMap
+
+    println("tagVUIDs: ")
+    tagVUIDs.foreach(m => println(m._1 + " => " + m._2.mkString(", ")))
+
+    val tagKKeys: Array[String] = tagKUIDs.keys.toArray
+    val tagVKeys: Array[String] = tagVUIDs.keys.toArray
+
+    // all tags must exist
+    if (tags.size != tagKKeys.length  || tagKKeys.length != tagVKeys.length) {
+      println("Can't find keys or values")
+      // TODO try to print missing values
+      System.exit(1)
+    }
+
+    val tagKV = tagKUIDs
+      .map(k => (k._2, tagVUIDs(tags(k._1)))) // key(byte Array), value(byte Array)
+      .map(l => (l._1 ++ l._2)) // key + value
+      .toList
+      .sorted(Ordering.by((_: Array[Byte]).toIterable))
 
     val tsdb: RDD[(ImmutableBytesWritable, Result)] = sc.newAPIHadoopRDD(
       tsdbConfig(
