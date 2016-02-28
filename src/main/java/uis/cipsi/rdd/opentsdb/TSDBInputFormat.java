@@ -104,7 +104,7 @@ public class TSDBInputFormat extends TableInputFormat implements Configurable {
 				// Configuration for extracting & filtering the required rows
 				// from tsdb table.
 				if (conf.get(METRICS) != null) {
-					String name = null;
+					String name;
 					if (conf.get(TAGKV) != null) // If we have to extract based
 													// on a metric and its group
 													// of tags "^%s.{4}.*%s.*$"
@@ -121,11 +121,21 @@ public class TSDBInputFormat extends TableInputFormat implements Configurable {
 				}
 				// Extracts data based on the supplied timerange. If timerange
 				// is not provided then all data are extracted
-				if (conf.get(SCAN_TIMERANGE_START) != null)
-                    scan.setStartRow(hexStringToByteArray(conf.get(METRICS) + conf.get(SCAN_TIMERANGE_START) + conf.get(TAGKV)));
+				if (conf.get(SCAN_TIMERANGE_START) != null) {
+                    System.out.println("Set Scan Start Row");
+                    String startRow = conf.get(METRICS) + conf.get(SCAN_TIMERANGE_START) + (conf.get(TAGKV) != null ? conf.get(TAGKV) : "");
+                    System.out.println("Start Row: " + startRow);
 
-                if(conf.get(SCAN_TIMERANGE_END) != null)
-					scan.setStopRow(hexStringToByteArray(conf.get(METRICS) + conf.get(SCAN_TIMERANGE_END) + conf.get(TAGKV)));
+                    scan.setStartRow(hexStringToByteArray(startRow));
+                }
+
+                if(conf.get(SCAN_TIMERANGE_END) != null) {
+                    System.out.println("Set Scan End Row");
+                    String endRow = conf.get(METRICS) + conf.get(SCAN_TIMERANGE_END) + (conf.get(TAGKV) != null ? conf.get(TAGKV) : "");
+                    System.out.println("End Row: " + endRow);
+
+                    scan.setStopRow(hexStringToByteArray(endRow));
+                }
 			}
 			// false by default, full table scans generate too much BC churn
 			scan.setCacheBlocks((conf.getBoolean(SCAN_CACHEBLOCKS, false)));
@@ -134,4 +144,5 @@ public class TSDBInputFormat extends TableInputFormat implements Configurable {
 		}
 		setScan(scan);
 	}
+
 }

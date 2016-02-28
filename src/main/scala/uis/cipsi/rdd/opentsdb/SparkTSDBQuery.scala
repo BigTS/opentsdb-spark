@@ -18,7 +18,7 @@ class SparkTSDBQuery(sMaster: String, zkQuorum: String, zkClientPort: String) ex
   private val sparkMaster = sMaster
   private val zookeeperQuorum = zkQuorum
   private val zookeeperClientPort = zkClientPort
-  private val format_data = new java.text.SimpleDateFormat("ddMMyyyyHH:mm")
+  private val format_data = new java.text.SimpleDateFormat("yyyy/MM/dd HH:mm")
 
   def generalConfig(zookeeperQuorum: String, zookeeperClientPort: String): Configuration = {
     //Create configuration
@@ -40,42 +40,47 @@ class SparkTSDBQuery(sMaster: String, zkQuorum: String, zkClientPort: String) ex
 
   //Prepares the configuration for querying the TSDB table
   def tsdbConfig(zookeeperQuorum: String, zookeeperClientPort: String,
-    metric: Array[Byte], tagkv: Option[Array[Byte]] = None,
-    startdate: Option[String] = None, enddate: Option[String] = None) = {
+                 metricUID: Array[Byte], tagkv: Option[Array[Byte]] = None,
+                 startdate: Option[String] = None, enddate: Option[String] = None) = {
 
     val config = generalConfig(zookeeperQuorum, zookeeperClientPort)
     config.set("hbase.mapreduce.inputtable", "tsdb")
-    config.set("net.opentsdb.rowkey", bytes2hex(metric, "\\x"))
+
+    config.set(TSDBInputFormat.METRICS, bytes2hex(metricUID))
     if (tagkv != None) {
-      config.set("net.opentsdb.tagkv", bytes2hex(tagkv.get, "\\x"))
+      config.set(TSDBInputFormat.TAGKV, bytes2hex(tagkv.get))
     }
 
+    def getTime(date: String): String = {
+      val MAX_TIMESPAN = 3600
+      def getBaseTime(date: String): Int = {
+        val timestamp = format_data.parse(date).getTime()
+        val base_time = ((timestamp / 1000) - ((timestamp / 1000) % MAX_TIMESPAN)).toInt
+        base_time
+      }
 
-//    def getTime(date: String): String = {
-//      val MAX_TIMESPAN = 3600
-//      def getBaseTime(date: String): Int = {
-//        val timestamp = format_data.parse(startdate.get).getTime()
-//        val base_time = ((timestamp / 1000) - ((timestamp / 1000) % MAX_TIMESPAN)).toInt
-//        base_time
-//      }
-//
-//      val baseTime = getBaseTime(date)
-//      val x: ByteBuffer = new ByteBuffer()
-//      x.putInt(baseTime)
-//      x.array().mkString("")
-//    }
-//
-//    if (startdate != None)
-//      config.set(TSDBInputFormat.SCAN_TIMERANGE_START, getTime(startdate.get))
-//
-//    if (enddate != None)
-//      config.set(TSDBInputFormat.SCAN_TIMERANGE_END, getTime(enddate.get))
+      val baseTime = getBaseTime(date)
+      println(s"BaseTime:($date)" + baseTime)
+      val intByteArray: Array[Byte] = ByteBuffer.allocate(Integer.BYTES).putInt(baseTime).array()
+      bytes2hex(intByteArray)
+    }
+
+    if (startdate != None) {
+      println("StartDate: " + getTime(startdate.get))
+      config.set(TSDBInputFormat.SCAN_TIMERANGE_START, getTime(startdate.get))
+    }
+
+    if (enddate != None) {
+      println("EndDate: " + getTime(enddate.get))
+      config.set(TSDBInputFormat.SCAN_TIMERANGE_END, getTime(enddate.get))
+    }
 
     config
   }
 
   //Converts Bytes to Hex (see: https://gist.github.com/tmyymmt/3727124)
-  def bytes2hex(bytes: Array[Byte], sep: String): String = {
+  def bytes2hex(bytes: Array[Byte]): String = {
+    val sep = "\\x"
     val regex = sep + bytes.map("%02x".format(_).toUpperCase()).mkString(sep)
     regex
   }
