@@ -96,7 +96,6 @@ public class TSDBInputFormat extends TableInputFormat implements Configurable {
 				// We get all uids for all specified column quantifiers
 				// (metrics|tagk|tagv)
 				String pattern = String.format("^(%s)$", conf.get(TSDB_UIDS));
-                System.out.println("Pattern: " + pattern);
                 RegexStringComparator keyRegEx = new RegexStringComparator(pattern);
 				RowFilter rowFilter = new RowFilter(CompareOp.EQUAL, keyRegEx);
 				scan.setFilter(rowFilter);
@@ -122,18 +121,12 @@ public class TSDBInputFormat extends TableInputFormat implements Configurable {
 				// Extracts data based on the supplied timerange. If timerange
 				// is not provided then all data are extracted
 				if (conf.get(SCAN_TIMERANGE_START) != null) {
-                    System.out.println("Set Scan Start Row");
                     String startRow = conf.get(METRICS) + conf.get(SCAN_TIMERANGE_START) + (conf.get(TAGKV) != null ? conf.get(TAGKV) : "");
-                    System.out.println("Start Row: " + startRow);
-
                     scan.setStartRow(hexStringToByteArray(startRow));
                 }
 
                 if(conf.get(SCAN_TIMERANGE_END) != null) {
-                    System.out.println("Set Scan End Row");
                     String endRow = conf.get(METRICS) + conf.get(SCAN_TIMERANGE_END) + (conf.get(TAGKV) != null ? conf.get(TAGKV) : "");
-                    System.out.println("End Row: " + endRow);
-
                     scan.setStopRow(hexStringToByteArray(endRow));
                 }
 			}
