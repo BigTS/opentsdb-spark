@@ -242,7 +242,7 @@ class SparkTSDBQuery(zkQuorum: String, zkClientPort: String) extends Serializabl
   private def tsdbuidConfig(zookeeperQuorum: String, zookeeperClientPort: String, columnQ: Array[String]) = {
     val config = generalConfig(zookeeperQuorum, zookeeperClientPort)
     config.set("hbase.mapreduce.inputtable", "tsdb-uid")
-    config.set(TSDBInputFormat.TSDB_UIDS, columnQ.mkString("|"))
+    config.set(TSDBScan.TSDB_UIDS, columnQ.mkString("|"))
     config
   }
 
@@ -254,16 +254,16 @@ class SparkTSDBQuery(zkQuorum: String, zkClientPort: String) extends Serializabl
     val config = generalConfig(zookeeperQuorum, zookeeperClientPort)
     config.set("hbase.mapreduce.inputtable", "tsdb")
 
-    config.set(TSDBInputFormat.METRICS, bytes2hex(metricUID))
+    config.set(TSDBScan.METRICS, bytes2hex(metricUID))
     if (tagkv != None) {
-      config.set(TSDBInputFormat.TAGKV, bytes2hex(tagkv.get))
+      config.set(TSDBScan.TAGKV, bytes2hex(tagkv.get))
     }
 
     if (startdate != None)
-      config.set(TSDBInputFormat.SCAN_TIMERANGE_START, getTime(startdate.get))
+      config.set(TSDBScan.SCAN_TIMERANGE_START, getTime(startdate.get))
 
     if (enddate != None)
-      config.set(TSDBInputFormat.SCAN_TIMERANGE_END, getTime(enddate.get))
+      config.set(TSDBScan.SCAN_TIMERANGE_END, getTime(enddate.get))
 
     config
   }
