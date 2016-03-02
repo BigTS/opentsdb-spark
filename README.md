@@ -31,9 +31,10 @@ Module for accessing OpenTSDB data through Spark.
 
     SPARK_CLASSPATH="$SPARK_CLASSPATH:$dir"
     done
-
+    
+    SPARK_CLASSPATH="$SPARK_CLASSPATH:/.../hbase/hbase-spark/target/hbase-spark-2.0.0-SNAPSHOT.jar"
 #System Info
-  Apache Hadoop 2.6.0, Apache Hbase 1.1.2, Apache Spark 1.6.0, Scala 2.10.5
+  Apache Hadoop 2.6.0, Apache Hbase 2.0.0-SNAPSHOT, Apache Spark 1.6.0, Scala 2.10.5
 
 
 
