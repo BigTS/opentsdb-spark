@@ -4,6 +4,7 @@ import java.util
 import java.util.Map.Entry
 
 import org.apache.hadoop.hbase.HBaseConfiguration
+import org.apache.hadoop.hbase.mapreduce.TableInputFormat
 import org.apache.spark.SparkContext
 import org.apache.hadoop.conf.Configuration
 import org.apache.spark.rdd.RDD
@@ -28,7 +29,6 @@ class SparkTSDBQuery(zkQuorum: String, zkClientPort: String) extends Serializabl
     * @param startdate      start date of the query, should be on this format: yyyy/MM/dd HH:mm
     * @param enddate        end date of the query, should be on this format: yyyy/MM/dd HH:mm
     * @param sc             Spark Context
-    *
     * @return RDD that represents the time series fetched from opentsdb, will be on this format (time, value)
     */
   def generateRDD(metricName: String, tagsKeysValues: String, startdate: String, enddate: String,
@@ -206,15 +206,10 @@ class SparkTSDBQuery(zkQuorum: String, zkClientPort: String) extends Serializabl
   private def read_tsdbUID_table(metricName: String, tags: Map[String, String], sc: SparkContext):
   RDD[(ImmutableBytesWritable, Result)] = {
 
-    val tsdbUID = sc.newAPIHadoopRDD(
-      tsdbuidConfig(
-        zookeeperQuorum,
-        zookeeperClientPort,
-        Array(metricName, tags.map(_._1).mkString("|"), tags.map(_._2).mkString("|"))
-      ),
-      classOf[uis.cipsi.rdd.opentsdb.TSDBInputFormat],
-      classOf[ImmutableBytesWritable],
-      classOf[Result])
+    val config = tsdbuidConfig(zookeeperQuorum, zookeeperClientPort,
+      Array(metricName, tags.map(_._1).mkString("|"), tags.map(_._2).mkString("|")))
+
+    val tsdbUID = readTable(sc, config)
 
     tsdbUID
   }
@@ -222,27 +217,29 @@ class SparkTSDBQuery(zkQuorum: String, zkClientPort: String) extends Serializabl
   private def read_tsdb_table(metricsUID: Array[Array[Byte]], tagKV: List[Array[Byte]], startdate: String,
                               enddate: String, sc: SparkContext): RDD[(ImmutableBytesWritable, Result)] = {
 
-    val tsdb = sc.newAPIHadoopRDD(
-      tsdbConfig(
-        zookeeperQuorum,
-        zookeeperClientPort,
-        metricsUID.last,
-        if (tagKV.size != 0) Option(tagKV.flatten.toArray) else None,
-        if (startdate != "*") Option(startdate) else None,
-        if (enddate != "*") Option(enddate) else None
-      ),
-      classOf[uis.cipsi.rdd.opentsdb.TSDBInputFormat],
-      classOf[org.apache.hadoop.hbase.io.ImmutableBytesWritable],
-      classOf[org.apache.hadoop.hbase.client.Result])
+    val config = tsdbConfig(zookeeperQuorum, zookeeperClientPort, metricsUID.last,
+      if (tagKV.size != 0) Option(tagKV.flatten.toArray) else None,
+      if (startdate != "*") Option(startdate) else None,
+      if (enddate != "*") Option(enddate) else None
+    )
 
+    val tsdb = readTable(sc, config)
     tsdb
+  }
+
+  def readTable(sc: SparkContext, config: Configuration) = {
+    sc.newAPIHadoopRDD(
+      config,
+      classOf[uis.cipsi.rdd.opentsdb.TSDBInputFormat],
+      classOf[ImmutableBytesWritable],
+      classOf[Result])
   }
 
   //Prepares the configuration for querying the TSDB-UID table and extracting UIDs for metrics and tags
   private def tsdbuidConfig(zookeeperQuorum: String, zookeeperClientPort: String, columnQ: Array[String]) = {
     val config = generalConfig(zookeeperQuorum, zookeeperClientPort)
-    config.set("hbase.mapreduce.inputtable", "tsdb-uid")
-    config.set(TSDBInputFormat.TSDB_UIDS, columnQ.mkString("|"))
+    config.set(TableInputFormat.INPUT_TABLE, "tsdb-uid")
+    config.set(TSDBScan.TSDB_UIDS, columnQ.mkString("|"))
     config
   }
 
@@ -252,18 +249,18 @@ class SparkTSDBQuery(zkQuorum: String, zkClientPort: String) extends Serializabl
                          startdate: Option[String] = None, enddate: Option[String] = None): Configuration = {
 
     val config = generalConfig(zookeeperQuorum, zookeeperClientPort)
-    config.set("hbase.mapreduce.inputtable", "tsdb")
+    config.set(TableInputFormat.INPUT_TABLE, "tsdb")
 
-    config.set(TSDBInputFormat.METRICS, bytes2hex(metricUID))
+    config.set(TSDBScan.METRICS, bytes2hex(metricUID))
     if (tagkv != None) {
-      config.set(TSDBInputFormat.TAGKV, bytes2hex(tagkv.get))
+      config.set(TSDBScan.TAGKV, bytes2hex(tagkv.get))
     }
 
     if (startdate != None)
-      config.set(TSDBInputFormat.SCAN_TIMERANGE_START, getTime(startdate.get))
+      config.set(TSDBScan.SCAN_TIMERANGE_START, getTime(startdate.get))
 
     if (enddate != None)
-      config.set(TSDBInputFormat.SCAN_TIMERANGE_END, getTime(enddate.get))
+      config.set(TSDBScan.SCAN_TIMERANGE_END, getTime(enddate.get))
 
     config
   }

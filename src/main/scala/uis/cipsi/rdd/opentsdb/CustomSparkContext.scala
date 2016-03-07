@@ -28,7 +28,9 @@ object CustomSparkContext {
     } else {
       val jar = Jar
       val classPath = this.getClass.getResource("/" + this.getClass.getName.replace('.', '/') + ".class").toString()
-      val sourceDir = classPath.substring("file:".length, classPath.indexOf("uis/cipsi/rdd/opentsdb")).toString()
+      val sourceDir = classPath.substring("file:".length, classPath.indexOf("uis/cipsi/rdd/opentsdb"))
+      println("SourceDir: " + sourceDir)
+
       jar.create(File("/tmp/opentsdb-spark.jar"), Directory(sourceDir), "opentsdb-spark")
       sparkConf.setJars(Seq("/tmp/opentsdb-spark.jar"))
     }
