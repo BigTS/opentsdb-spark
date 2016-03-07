@@ -1,5 +1,8 @@
 package uis.cipsi.rdd.opentsdb;
 
+import java.nio.charset.Charset;
+import java.util.regex.Pattern;
+
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configurable;
@@ -11,7 +14,6 @@ import org.apache.hadoop.hbase.filter.RegexStringComparator;
 import org.apache.hadoop.hbase.filter.RowFilter;
 import org.apache.hadoop.util.StringUtils;
 import org.apache.hadoop.hbase.mapreduce.TableInputFormat;
-import org.apache.hadoop.hbase.util.Bytes;
 
 /**
  * Convert HBase tabular data into a format that is consumable by Map/Reduce.
@@ -54,16 +56,16 @@ public class TSDBInputFormat extends TableInputFormat implements Configurable {
 	public Configuration getConf() {
 		return conf;
 	}
-	
+
 	public static byte[] hexStringToByteArray(String s) {
 		s = s.replace("\\x", "");
 		byte[] b = new byte[s.length() / 2];
-	    for (int i = 0; i < b.length; i++) {
-	      int index = i * 2;
-	      int v = Integer.parseInt(s.substring(index, index + 2), 16);
-	      b[i] = (byte) v;
-	    }
-	    return b;
+		for (int i = 0; i < b.length; i++) {
+			int index = i * 2;
+			int v = Integer.parseInt(s.substring(index, index + 2), 16);
+			b[i] = (byte) v;
+		}
+		return b;
 	}
 
 	/**
@@ -102,28 +104,28 @@ public class TSDBInputFormat extends TableInputFormat implements Configurable {
 					String name = null;
 					if (conf.get(TAGKV) != null) // If we have to extract based
 													// on a metric and its group
-													// of tags
-						name = String.format("^%s.{4}.*%s.*$",
-								conf.get(METRICS), conf.get(TAGKV));
+													// of tags "^%s.{4}.*%s.*$"
+						name = String.format("^%s.*%s.*$", conf.get(METRICS), conf.get(TAGKV));
 					else
 						// If we have to extract based on just the metric
 						name = String.format("^%s.+$", conf.get(METRICS));
 					
 					RegexStringComparator keyRegEx = new RegexStringComparator(
-							name);
-					RowFilter rowFilter = new RowFilter(CompareOp.EQUAL,
-							keyRegEx);
+							name, Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
+					keyRegEx.setCharset(Charset.forName("ISO-8859-1"));
+					RowFilter rowFilter = new RowFilter(CompareOp.EQUAL, keyRegEx);
 					scan.setFilter(rowFilter);
+					//scan.setFilter(rowFilter);
 				}
 				// Extracts data based on the supplied timerange. If timerange
 				// is not provided then all data are extracted
 				if (conf.get(SCAN_TIMERANGE_START) != null
 						&& conf.get(SCAN_TIMERANGE_END) != null) {
-					
-//					System.out.println( (conf.get(METRICS) + conf.get(SCAN_TIMERANGE_START) + conf.get(TAGKV)) );
-//					System.out.println((hexStringToByteArray(conf.get(METRICS) + conf.get(SCAN_TIMERANGE_START) + conf.get(TAGKV))).length);
-					scan.setStartRow( hexStringToByteArray(conf.get(METRICS) + conf.get(SCAN_TIMERANGE_START) + conf.get(TAGKV)) );
-					scan.setStopRow( hexStringToByteArray(conf.get(METRICS) + conf.get(SCAN_TIMERANGE_END) + conf.get(TAGKV)) );
+
+					scan.setStartRow(hexStringToByteArray(conf.get(METRICS)
+							+ conf.get(SCAN_TIMERANGE_START) + conf.get(TAGKV)));
+					scan.setStopRow(hexStringToByteArray(conf.get(METRICS)
+							+ conf.get(SCAN_TIMERANGE_END) + conf.get(TAGKV)));
 
 				}
 			}

@@ -4,10 +4,10 @@
 	<info
 		organisation="default"
 		module="opentsdb-spark_2.10"
-		revision="0.1"
+		revision="0.1-SNAPSHOT"
 		conf="plugin"
 		confs="compile, runtime, test, provided, optional, compile-internal, runtime-internal, test-internal, plugin, sources, docs, pom, scala-tool"
-		date="20140724114904"/>
+		date="20160228173448"/>
 	<dependencies>
 	</dependencies>
 </ivy-report>

@@ -16,14 +16,26 @@ Module for accessing OpenTSDB data through Spark.
   >For each node in the cluster add the following into your com file
   1. nano /path/to/your/spark/dir/bin/compute-classpath.sh
   2. copy the following to the end of the file. Before echo "$CLASSPATH"\\
-      export HBASE_HOME=/path/to/your/hbase/dir (if you haven't already defined the $HBASE_HOME env var)
+      
+      #HBASE home directory
+      export HBASE_HOME=/path/to/your/hbase/dir
 
+      #Add HBASE libs to Spark CLASSPATH
       for f in $HBASE_HOME/lib/*.jar
         do
     	CLASSPATH="$CLASSPATH:$f"
       done
+      
+      #SCALA home directory
+      SCALA_HOME=/path/to/your/scala/dir
+      
+      #Add Scala libs to Spark CLASSPATH
+      for f in $SCALA_HOME/lib/*.jar
+        do
+          CLASSPATH="$CLASSPATH:$f"
+        done
 
 #System Info
-  Apache Hadoop 2.2.0, Apache Hbase 0.98.3-hadoop2, Apache Spark 1.0.1, Scala 2.10.4
+  Cloudera Hadoop 2.5.0-cdh5.3.0, Cloudera Hbase 0.98.6-cdh5.3.0, Cloudera Spark 1.2.0-cdh5.3.0, Scala 2.11.6, OpenTSDB 2.0.1
 
 
