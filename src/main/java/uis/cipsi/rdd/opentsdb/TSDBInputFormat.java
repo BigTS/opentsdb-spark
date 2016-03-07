@@ -26,12 +26,12 @@ public class TSDBInputFormat extends TableInputFormat implements Configurable {
 	 * The starting timestamp used to filter columns with a specific range of
 	 * versions.
 	 */
-	public static final String SCAN_TIMERANGE_START = "hbase.mapreduce.scan.timerange.start";
+	public static final String SCAN_TIMERANGE_START = "opentsdb.timerange.start";
 	/**
 	 * The ending timestamp used to filter columns with a specific range of
 	 * versions.
 	 */
-	public static final String SCAN_TIMERANGE_END = "hbase.mapreduce.scan.timerange.end";
+	public static final String SCAN_TIMERANGE_END = "opentsdb.timerange.end";
 
 	public static final String TSDB_UIDS = "net.opentsdb.tsdb.uid";
 	/** The opentsdb metric to be retrived. */
@@ -77,7 +77,9 @@ public class TSDBInputFormat extends TableInputFormat implements Configurable {
 	 */
 	@Override
 	public void setConf(Configuration configuration) {
+		super.setConf(configuration);
 		this.conf = configuration;
+
 		String tableName = conf.get(INPUT_TABLE);
 		try {
 			setHTable(new HTable(new Configuration(conf), tableName));
@@ -93,15 +95,15 @@ public class TSDBInputFormat extends TableInputFormat implements Configurable {
 			if (conf.get(TSDB_UIDS) != null) {
 				// We get all uids for all specified column quantifiers
 				// (metrics|tagk|tagv)
-				String name = String.format("^%s$", conf.get(TSDB_UIDS));
-				RegexStringComparator keyRegEx = new RegexStringComparator(name);
+				String pattern = String.format("^(%s)$", conf.get(TSDB_UIDS));
+                RegexStringComparator keyRegEx = new RegexStringComparator(pattern);
 				RowFilter rowFilter = new RowFilter(CompareOp.EQUAL, keyRegEx);
 				scan.setFilter(rowFilter);
 			} else {
 				// Configuration for extracting & filtering the required rows
 				// from tsdb table.
 				if (conf.get(METRICS) != null) {
-					String name = null;
+					String name;
 					if (conf.get(TAGKV) != null) // If we have to extract based
 													// on a metric and its group
 													// of tags "^%s.{4}.*%s.*$"
@@ -110,8 +112,7 @@ public class TSDBInputFormat extends TableInputFormat implements Configurable {
 						// If we have to extract based on just the metric
 						name = String.format("^%s.+$", conf.get(METRICS));
 					
-					RegexStringComparator keyRegEx = new RegexStringComparator(
-							name, Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
+					RegexStringComparator keyRegEx = new RegexStringComparator(name, Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
 					keyRegEx.setCharset(Charset.forName("ISO-8859-1"));
 					RowFilter rowFilter = new RowFilter(CompareOp.EQUAL, keyRegEx);
 					scan.setFilter(rowFilter);
@@ -119,15 +120,15 @@ public class TSDBInputFormat extends TableInputFormat implements Configurable {
 				}
 				// Extracts data based on the supplied timerange. If timerange
 				// is not provided then all data are extracted
-				if (conf.get(SCAN_TIMERANGE_START) != null
-						&& conf.get(SCAN_TIMERANGE_END) != null) {
+				if (conf.get(SCAN_TIMERANGE_START) != null) {
+                    String startRow = conf.get(METRICS) + conf.get(SCAN_TIMERANGE_START) + (conf.get(TAGKV) != null ? conf.get(TAGKV) : "");
+                    scan.setStartRow(hexStringToByteArray(startRow));
+                }
 
-					scan.setStartRow(hexStringToByteArray(conf.get(METRICS)
-							+ conf.get(SCAN_TIMERANGE_START) + conf.get(TAGKV)));
-					scan.setStopRow(hexStringToByteArray(conf.get(METRICS)
-							+ conf.get(SCAN_TIMERANGE_END) + conf.get(TAGKV)));
-
-				}
+                if(conf.get(SCAN_TIMERANGE_END) != null) {
+                    String endRow = conf.get(METRICS) + conf.get(SCAN_TIMERANGE_END) + (conf.get(TAGKV) != null ? conf.get(TAGKV) : "");
+                    scan.setStopRow(hexStringToByteArray(endRow));
+                }
 			}
 			// false by default, full table scans generate too much BC churn
 			scan.setCacheBlocks((conf.getBoolean(SCAN_CACHEBLOCKS, false)));
@@ -136,4 +137,5 @@ public class TSDBInputFormat extends TableInputFormat implements Configurable {
 		}
 		setScan(scan);
 	}
+
 }
