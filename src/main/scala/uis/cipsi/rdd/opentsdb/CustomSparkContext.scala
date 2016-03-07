@@ -8,10 +8,7 @@ import scala.tools.nsc.io.Directory
 import scala.Option.option2Iterable
 import scala.reflect.io.Path.string2path
 
-/**
-  * @author antorweepchakravorty
-  *
-  */
+
 object CustomSparkContext {
   def create(sparkMaster: String = "local",
              zookeeperQuorum: String = "localhost",

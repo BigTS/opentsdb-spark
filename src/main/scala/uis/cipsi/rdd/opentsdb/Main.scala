@@ -5,10 +5,7 @@ package uis.cipsi.rdd.opentsdb
 
 import org.apache.spark.rdd.RDD
 
-/**
-  * @author antorweep chakravorty, mahmoud hanafy
-  *
-  */
+
 object Main {
   def main(args: Array[String]) {
 
