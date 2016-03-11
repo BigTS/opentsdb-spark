@@ -1,4 +1,4 @@
-package uis.cipsi.rdd.opentsdb
+package org.bigts.rdd.opentsdb
 
 import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.hbase.TableName

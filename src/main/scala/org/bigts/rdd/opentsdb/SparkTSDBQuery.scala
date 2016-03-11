@@ -1,4 +1,4 @@
-package uis.cipsi.rdd.opentsdb
+package org.bigts.rdd.opentsdb
 
 import java.util
 import java.util.Map.Entry
@@ -230,7 +230,7 @@ class SparkTSDBQuery(zkQuorum: String, zkClientPort: String) extends Serializabl
   def readTable(sc: SparkContext, config: Configuration) = {
     sc.newAPIHadoopRDD(
       config,
-      classOf[uis.cipsi.rdd.opentsdb.TSDBInputFormat],
+      classOf[TSDBInputFormat],
       classOf[ImmutableBytesWritable],
       classOf[Result])
   }

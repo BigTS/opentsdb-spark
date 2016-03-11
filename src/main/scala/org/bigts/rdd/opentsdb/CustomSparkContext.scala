@@ -1,4 +1,4 @@
-package uis.cipsi.rdd.opentsdb
+package org.bigts.rdd.opentsdb
 
 import org.apache.spark.SparkContext
 import org.apache.spark.SparkConf
@@ -28,7 +28,7 @@ object CustomSparkContext {
     } else {
       val jar = Jar
       val classPath = this.getClass.getResource("/" + this.getClass.getName.replace('.', '/') + ".class").toString()
-      val sourceDir = classPath.substring("file:".length, classPath.indexOf("uis/cipsi/rdd/opentsdb"))
+      val sourceDir = classPath.substring("file:".length, classPath.indexOf("org/bigts/rdd/opentsdb"))
       println("SourceDir: " + sourceDir)
 
       jar.create(File("/tmp/opentsdb-spark.jar"), Directory(sourceDir), "opentsdb-spark")

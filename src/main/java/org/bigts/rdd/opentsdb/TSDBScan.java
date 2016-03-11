@@ -1,4 +1,4 @@
-package uis.cipsi.rdd.opentsdb;
+package org.bigts.rdd.opentsdb;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;

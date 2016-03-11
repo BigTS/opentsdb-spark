@@ -1,7 +1,7 @@
 /**
   * Test Access to OpenTSDB
   */
-package uis.cipsi.rdd.opentsdb
+package org.bigts.rdd.opentsdb
 
 import org.apache.spark.rdd.RDD
 
@@ -22,10 +22,10 @@ object Main {
     //    val startD = args(5) //"ddmmyyyyhh:mm" (or can be *)
     //    val endD = args(6) //"ddmmyyyyhh:mm" (or can be)
 
-    val sparkMaster = "spark://localhost:7077"
+    val sparkMaster = "local"
     val zookeeperQuorum = "localhost"
     val zookeeperClientPort = "2181"
-    val metric = "hanafy.size"
+    val metric = "bigts.size"
     val tagVal = "age->24,status->engaged"
     val startD = "2010/02/22 10:00"
     val endD = "2016/02/29 10:00"
