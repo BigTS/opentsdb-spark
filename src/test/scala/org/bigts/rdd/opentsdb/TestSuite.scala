@@ -1,33 +1,16 @@
-/**
-  * Test Access to OpenTSDB
-  */
 package org.bigts.rdd.opentsdb
 
 import org.apache.spark.rdd.RDD
+import org.scalatest.{ShouldMatchers, FunSuite}
 
-
-object Main {
-  def main(args: Array[String]) {
-
-    //    if(args.length != 9) {
-    //      println("Required params.: sparkmaster zkqourum zkport metric tagkeyval startdate enddate driverhost driverport")
-    //      System.exit(1)
-    //    }
-    //
-    //    val sparkMaster = args(0) //"spark://ip.or.hostname:port" //"local (for localhost)"
-    //    val zookeeperQuorum = args(1) //"ip.or.hostname"
-    //    val zookeeperClientPort = args(2) //"zookeeper port"
-    //    val metric = args(3) //"Metric.Name"
-    //    val tagVal = args(4) //"tag.key->tag.value" (can also be * or tag.key->*)
-    //    val startD = args(5) //"ddmmyyyyhh:mm" (or can be *)
-    //    val endD = args(6) //"ddmmyyyyhh:mm" (or can be)
-
+class TestSuite extends FunSuite with ShouldMatchers {
+  test("Main") {
     val sparkMaster = "local"
     val zookeeperQuorum = "localhost"
     val zookeeperClientPort = "2181"
-    val metric = "bigts.size"
-    val tagVal = "age->24,status->engaged"
-    val startD = "2010/02/22 10:00"
+    val metric = "product.sales"
+    val tagVal = "id->1"
+    val startD = "2016/01/01 10:00"
     val endD = "2016/02/29 10:00"
 
     val sc = CustomSparkContext.create(sparkMaster = sparkMaster, zookeeperQuorum = zookeeperQuorum,
@@ -57,5 +40,4 @@ object Main {
     //Collect & Print the data
     rdd.collect.foreach(point => println(s"$prefix: " + point._1 + ", " + point._2))
   }
-
 }
