@@ -1,7 +1,0 @@
-name := "opentsdb-spark"
-name := opentsdb-spark
-set name := "opentsdb-spark"
-session save
-exit
-:quit
-exit
