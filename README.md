@@ -1,3 +1,5 @@
+[![Build Status](https://travis-ci.org/BigTS/opentsdb-spark.svg)](https://travis-ci.org/BigTS/opentsdb-spark)
+
 opentsdb-spark
 ==============
 
