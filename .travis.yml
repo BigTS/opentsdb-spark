@@ -4,3 +4,6 @@ dist: trusty
 jdk: oraclejdk8
 install: ./opentsdb-env.sh
 script: mvn test
+cache:
+  directories:
+    - $HOME/.m2
