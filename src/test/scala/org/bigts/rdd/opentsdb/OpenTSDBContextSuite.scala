@@ -1,13 +1,11 @@
 package org.bigts.rdd.opentsdb
 
-import org.apache.spark.rdd.RDD
+import org.apache.hadoop.hbase.HBaseConfiguration
 import org.apache.spark.{SparkConf, SparkContext}
-import org.scalatest._
+import org.apache.spark.rdd.RDD
+import org.scalatest.{ShouldMatchers, FunSuite}
 
-class HBaseSparkTSDBQuerySuite extends FunSuite with ShouldMatchers {
-
-  val zookeeperQuorum = "localhost"
-  val zookeeperClientPort = "2181"
+class OpenTSDBContextSuite extends FunSuite with ShouldMatchers {
 
   def createSC(): SparkContext = {
     new SparkContext(new SparkConf()
@@ -16,21 +14,22 @@ class HBaseSparkTSDBQuerySuite extends FunSuite with ShouldMatchers {
   }
 
   def testCase(metric: String, tagVal: String, startD: String, endD: String,
-                  verify: (RDD[(Long, Float)]) => Unit): Unit = {
+               verify: (RDD[(Long, Float)]) => Unit): Unit = {
     val sc = createSC()
 
-    val hbaseSpark = new HBaseSparkTSDBQuery(zookeeperQuorum, zookeeperClientPort)
+    val config = HBaseConfiguration.create()
 
-    val dataHBaseSpark: RDD[(Long, Float)] = hbaseSpark.generateRDD(
+    val opentsdb = new OpenTSDBContext(sc, config)
+
+    val rdd: RDD[(Long, Float)] = opentsdb.generateRDD(
       metricName = metric,
       tagsKeysValues = tagVal,
-      startdate = startD,
-      enddate = endD,
-      sc)
+      startDate = startD,
+      endDate = endD)
 
-    printRDD(dataHBaseSpark, "New API")
+    printRDD(rdd)
 
-    verify(dataHBaseSpark)
+    verify(rdd)
 
     sc.stop()
   }
@@ -54,14 +53,14 @@ class HBaseSparkTSDBQuerySuite extends FunSuite with ShouldMatchers {
       "2016/02/29 10:00",
       rdd => {
         rdd.count() should be (60)
-      })
+    })
   }
 
-  def printRDD(rdd: RDD[(Long, Float)], prefix: String) = {
+  def printRDD(rdd: RDD[(Long, Float)]) = {
     //Total number of points
-    println(s"$prefix: TimeSeries Data Count: " + rdd.count)
+    println("TimeSeries Data Count: " + rdd.count)
 
     //Collect & Print the data
-    rdd.collect.foreach(point => println(s"$prefix: " + point._1 + ", " + point._2))
+    rdd.collect.foreach(point => println(point._1 + ", " + point._2))
   }
 }
