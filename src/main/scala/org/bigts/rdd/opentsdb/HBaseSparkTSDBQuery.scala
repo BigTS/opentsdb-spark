@@ -6,10 +6,8 @@ import org.apache.hadoop.hbase.mapreduce.TableInputFormat
 import org.apache.hadoop.hbase.spark.HBaseContext
 import org.apache.spark.SparkContext
 
-/**
-  * Created by mahmoud on 29/02/16.
-  */
-class HBaseSparkTSDBQuery(zkQuorum: String, zkClientPort: String) extends SparkTSDBQuery(zkQuorum, zkClientPort) {
+class HBaseSparkTSDBQuery(zkQuorum: String, zkClientPort: String)
+  extends SparkTSDBQuery(zkQuorum, zkClientPort) {
 
   override def readTable(sc: SparkContext, config: Configuration) = {
     val hbaseContext = new HBaseContext(sc, config)

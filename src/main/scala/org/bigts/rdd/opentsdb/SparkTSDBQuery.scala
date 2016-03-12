@@ -21,8 +21,8 @@ class SparkTSDBQuery(zkQuorum: String, zkClientPort: String) extends Serializabl
   private val format_data = new java.text.SimpleDateFormat("yyyy/MM/dd HH:mm")
 
   /**
-    * Generate RDD for the given query. All tag keys and values must exist, if tag key or value is missing no data
-    * will be returned.
+    * Generate RDD for the given query. All tag keys and values must exist, if tag key or value is
+    * missing no data will be returned.
     *
     * @param metricName
     * @param tagsKeysValues should be on this format: tagk1->tagv1,tagk2->tagv2,....
@@ -31,8 +31,13 @@ class SparkTSDBQuery(zkQuorum: String, zkClientPort: String) extends Serializabl
     * @param sc             Spark Context
     * @return RDD that represents the time series fetched from opentsdb, will be on this format (time, value)
     */
-  def generateRDD(metricName: String, tagsKeysValues: String, startdate: String, enddate: String,
-                  sc: SparkContext): RDD[(Long, Float)] = {
+  def generateRDD(
+    metricName: String,
+    tagsKeysValues: String,
+    startdate: String,
+    enddate: String,
+    sc: SparkContext)
+  : RDD[(Long, Float)] = {
     println("Generating RDD...")
 
     val tags: Map[String, String] = parseTags(tagsKeysValues)
@@ -44,10 +49,7 @@ class SparkTSDBQuery(zkQuorum: String, zkClientPort: String) extends Serializabl
     val metricsUID = getMetricUID(tsdbUID)
     metricsUID.foreach(arr => println(arr.mkString(", ")))
 
-    if (metricsUID.isEmpty) {
-      println("Can't find metric: " + metricName)
-      System.exit(1)
-    }
+    require(!metricsUID.isEmpty, "Can't find metric: " + metricName)
 
     println("tagKUIDs: ")
     val tagKUIDs = getTagUIDs(tsdbUID, "tagk")
@@ -58,11 +60,9 @@ class SparkTSDBQuery(zkQuorum: String, zkClientPort: String) extends Serializabl
     tagVUIDs.foreach(m => println(m._1 + " => " + m._2.mkString(", ")))
 
     // all tags must exist
-    if (tags.size != tagKUIDs.size || tagKUIDs.size != tagVUIDs.size) {
-      println("Can't find keys or values")
-      // TODO print missing values
-      System.exit(1)
-    }
+    require(!(tags.size != tagKUIDs.size || tagKUIDs.size != tagVUIDs.size),
+      "Can't find keys or values")
+    // TODO print missing values
 
     val tagKV = joinTagKeysWithValues(tags, tagKUIDs, tagVUIDs)
 
@@ -203,8 +203,8 @@ class SparkTSDBQuery(zkQuorum: String, zkClientPort: String) extends Serializabl
     ((firstByte >> 4) & 15) == 15 // first 4 bytes = 1111
   }
 
-  private def read_tsdbUID_table(metricName: String, tags: Map[String, String], sc: SparkContext):
-  RDD[(ImmutableBytesWritable, Result)] = {
+  private def read_tsdbUID_table(metricName: String, tags: Map[String, String], sc: SparkContext)
+  : RDD[(ImmutableBytesWritable, Result)] = {
 
     val config = tsdbuidConfig(zookeeperQuorum, zookeeperClientPort,
       Array(metricName, tags.map(_._1).mkString("|"), tags.map(_._2).mkString("|")))
