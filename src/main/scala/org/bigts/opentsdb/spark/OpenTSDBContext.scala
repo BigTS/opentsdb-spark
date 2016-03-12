@@ -1,4 +1,4 @@
-package org.bigts.rdd.opentsdb
+package org.bigts.opentsdb.spark
 
 import java.util
 import java.util.Map.Entry

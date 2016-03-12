@@ -1,4 +1,4 @@
-package org.bigts.rdd.opentsdb;
+package org.bigts.opentsdb.spark;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;

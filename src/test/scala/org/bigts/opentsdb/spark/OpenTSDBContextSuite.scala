@@ -1,4 +1,4 @@
-package org.bigts.rdd.opentsdb
+package org.bigts.opentsdb.spark
 
 import org.apache.hadoop.hbase.HBaseConfiguration
 import org.apache.spark.{SparkConf, SparkContext}
