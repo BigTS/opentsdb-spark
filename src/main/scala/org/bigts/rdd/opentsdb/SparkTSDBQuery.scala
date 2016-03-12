@@ -5,7 +5,7 @@ import java.util.Map.Entry
 
 import org.apache.hadoop.hbase.HBaseConfiguration
 import org.apache.hadoop.hbase.mapreduce.TableInputFormat
-import org.apache.spark.SparkContext
+import org.apache.spark.{Logging, SparkContext}
 import org.apache.hadoop.conf.Configuration
 import org.apache.spark.rdd.RDD
 import scala.collection.mutable.ArrayBuffer
@@ -15,7 +15,7 @@ import org.apache.hadoop.hbase.client.Result
 import org.apache.hadoop.hbase.io.ImmutableBytesWritable
 import scala.Array.canBuildFrom
 
-class SparkTSDBQuery(zkQuorum: String, zkClientPort: String) extends Serializable {
+class SparkTSDBQuery(zkQuorum: String, zkClientPort: String) extends Serializable with Logging {
   private val zookeeperQuorum = zkQuorum
   private val zookeeperClientPort = zkClientPort
   private val format_data = new java.text.SimpleDateFormat("yyyy/MM/dd HH:mm")
@@ -38,26 +38,23 @@ class SparkTSDBQuery(zkQuorum: String, zkClientPort: String) extends Serializabl
     enddate: String,
     sc: SparkContext)
   : RDD[(Long, Float)] = {
-    println("Generating RDD...")
+    logInfo("Generating RDD ...")
 
     val tags: Map[String, String] = parseTags(tagsKeysValues)
 
     val tsdbUID = read_tsdbUID_table(metricName, tags, sc)
-    println("tsdbUID Count: " + tsdbUID.count)
+    logInfo("tsdbUID Count: " + tsdbUID.count)
 
-    println("MetricsUID: ")
     val metricsUID = getMetricUID(tsdbUID)
-    metricsUID.foreach(arr => println(arr.mkString(", ")))
+    metricsUID.foreach(arr => logInfo("MetricUID: " + arr.mkString(", ")))
 
     require(!metricsUID.isEmpty, "Can't find metric: " + metricName)
 
-    println("tagKUIDs: ")
     val tagKUIDs = getTagUIDs(tsdbUID, "tagk")
-    tagKUIDs.foreach(m => println(m._1 + " => " + m._2.mkString(", ")))
+    tagKUIDs.foreach(m => logInfo("tagKUID: " + m._1 + " => " + m._2.mkString(", ")))
 
-    println("tagVUIDs: ")
     val tagVUIDs = getTagUIDs(tsdbUID, "tagv")
-    tagVUIDs.foreach(m => println(m._1 + " => " + m._2.mkString(", ")))
+    tagVUIDs.foreach(m => logInfo("tagVUID: " + m._1 + " => " + m._2.mkString(", ")))
 
     // all tags must exist
     require(!(tags.size != tagKUIDs.size || tagKUIDs.size != tagVUIDs.size),

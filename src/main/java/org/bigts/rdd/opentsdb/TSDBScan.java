@@ -12,9 +12,6 @@ import org.apache.hadoop.util.StringUtils;
 import java.nio.charset.Charset;
 import java.util.regex.Pattern;
 
-/**
- * Created by mahmoud on 02/03/16.
- */
 public class TSDBScan {
 
     private static final Log LOG = LogFactory.getLog(TSDBInputFormat.class);
