@@ -1,22 +1,26 @@
 package org.bigts.rdd.opentsdb
 
+import org.apache.spark.{SparkConf, SparkContext}
 import org.apache.spark.rdd.RDD
 import org.scalatest.{ShouldMatchers, FunSuite}
 
 class TestSuite extends FunSuite with ShouldMatchers {
+
+  def createSC(): SparkContext = {
+    new SparkContext(new SparkConf()
+      .setAppName("OpenTSDB-Spark")
+      .setMaster("local"))
+  }
+
   test("Old API") {
-    val sparkMaster = "local"
     val zookeeperQuorum = "localhost"
     val zookeeperClientPort = "2181"
     val metric = "product.sales"
-    val tagVal = "id->1"
+    val tagVal = "id->1,store->1"
     val startD = "2016/01/01 00:00"
     val endD = "2016/02/29 10:00"
 
-    val sc = CustomSparkContext.create(
-      sparkMaster = sparkMaster,
-      zookeeperQuorum = zookeeperQuorum,
-      zookeeperClientPort = zookeeperClientPort)
+    val sc = createSC()
 
     //Connection to OpenTSDB
     val sparkTSDB = new SparkTSDBQuery(zookeeperQuorum, zookeeperClientPort)
@@ -37,7 +41,6 @@ class TestSuite extends FunSuite with ShouldMatchers {
   }
 
   test("New API") {
-    val sparkMaster = "local"
     val zookeeperQuorum = "localhost"
     val zookeeperClientPort = "2181"
     val metric = "product.sales"
@@ -45,10 +48,7 @@ class TestSuite extends FunSuite with ShouldMatchers {
     val startD = "2016/01/01 00:00"
     val endD = "2016/02/29 10:00"
 
-    val sc = CustomSparkContext.create(
-      sparkMaster = sparkMaster,
-      zookeeperQuorum = zookeeperQuorum,
-      zookeeperClientPort = zookeeperClientPort)
+    val sc = createSC()
 
     val hbaseSpark = new HBaseSparkTSDBQuery(zookeeperQuorum, zookeeperClientPort)
 
