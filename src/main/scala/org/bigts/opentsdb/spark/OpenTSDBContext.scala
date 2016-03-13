@@ -60,7 +60,7 @@ class OpenTSDBContext(hBaseContext: HBaseContext)
     tagVUIDs.foreach(m => logInfo("tagVUID: " + m._1 + " => " + m._2.mkString(", ")))
 
     // all tags must exist
-    require(!(tags.size != tagKUIDs.size || tagKUIDs.size != tagVUIDs.size),
+    require(tags.size == tagKUIDs.size && tags.filter(x => !tagVUIDs.contains(x._2)).isEmpty,
       "Can't find keys or values")
     // TODO print missing values
 
