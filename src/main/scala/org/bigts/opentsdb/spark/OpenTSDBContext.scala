@@ -1,11 +1,12 @@
-package org.bigts.rdd.opentsdb
+package org.bigts.opentsdb.spark
 
 import java.util
 import java.util.Map.Entry
 
-import org.apache.hadoop.hbase.HBaseConfiguration
+import org.apache.hadoop.hbase.{TableName, HBaseConfiguration}
 import org.apache.hadoop.hbase.mapreduce.TableInputFormat
-import org.apache.spark.SparkContext
+import org.apache.hadoop.hbase.spark.HBaseContext
+import org.apache.spark.{Logging, SparkContext}
 import org.apache.hadoop.conf.Configuration
 import org.apache.spark.rdd.RDD
 import scala.collection.mutable.ArrayBuffer
@@ -15,58 +16,57 @@ import org.apache.hadoop.hbase.client.Result
 import org.apache.hadoop.hbase.io.ImmutableBytesWritable
 import scala.Array.canBuildFrom
 
-class SparkTSDBQuery(zkQuorum: String, zkClientPort: String) extends Serializable {
-  private val zookeeperQuorum = zkQuorum
-  private val zookeeperClientPort = zkClientPort
+class OpenTSDBContext(hBaseContext: HBaseContext)
+  extends Serializable with Logging {
   private val format_data = new java.text.SimpleDateFormat("yyyy/MM/dd HH:mm")
+  @transient private val config = hBaseContext.tmpHdfsConfiguration
+
+  def this(sc: SparkContext, config: Configuration) {
+    this(new HBaseContext(sc, config))
+  }
 
   /**
-    * Generate RDD for the given query. All tag keys and values must exist, if tag key or value is missing no data
-    * will be returned.
+    * Generate RDD for the given query. All tag keys and values must exist, if tag key or value is
+    * missing no data will be returned.
     *
     * @param metricName
     * @param tagsKeysValues should be on this format: tagk1->tagv1,tagk2->tagv2,....
-    * @param startdate      start date of the query, should be on this format: yyyy/MM/dd HH:mm
-    * @param enddate        end date of the query, should be on this format: yyyy/MM/dd HH:mm
-    * @param sc             Spark Context
+    * @param startDate      start date of the query, should be on this format: yyyy/MM/dd HH:mm
+    * @param endDate        end date of the query, should be on this format: yyyy/MM/dd HH:mm
     * @return RDD that represents the time series fetched from opentsdb, will be on this format (time, value)
     */
-  def generateRDD(metricName: String, tagsKeysValues: String, startdate: String, enddate: String,
-                  sc: SparkContext): RDD[(Long, Float)] = {
-    println("Generating RDD...")
+  def generateRDD(
+      metricName: String,
+      tagsKeysValues: String,
+      startDate: String,
+      endDate: String)
+    : RDD[(Long, Float)] = {
+    logInfo("Generating RDD ...")
 
     val tags: Map[String, String] = parseTags(tagsKeysValues)
 
-    val tsdbUID = read_tsdbUID_table(metricName, tags, sc)
-    println("tsdbUID Count: " + tsdbUID.count)
+    val tsdbUID = read_tsdbUID_table(metricName, tags)
+    logInfo("tsdbUID Count: " + tsdbUID.count)
 
-    println("MetricsUID: ")
     val metricsUID = getMetricUID(tsdbUID)
-    metricsUID.foreach(arr => println(arr.mkString(", ")))
+    metricsUID.foreach(arr => logInfo("MetricUID: " + arr.mkString(", ")))
 
-    if (metricsUID.isEmpty) {
-      println("Can't find metric: " + metricName)
-      System.exit(1)
-    }
+    require(!metricsUID.isEmpty, "Can't find metric: " + metricName)
 
-    println("tagKUIDs: ")
     val tagKUIDs = getTagUIDs(tsdbUID, "tagk")
-    tagKUIDs.foreach(m => println(m._1 + " => " + m._2.mkString(", ")))
+    tagKUIDs.foreach(m => logInfo("tagKUID: " + m._1 + " => " + m._2.mkString(", ")))
 
-    println("tagVUIDs: ")
     val tagVUIDs = getTagUIDs(tsdbUID, "tagv")
-    tagVUIDs.foreach(m => println(m._1 + " => " + m._2.mkString(", ")))
+    tagVUIDs.foreach(m => logInfo("tagVUID: " + m._1 + " => " + m._2.mkString(", ")))
 
     // all tags must exist
-    if (tags.size != tagKUIDs.size || tagKUIDs.size != tagVUIDs.size) {
-      println("Can't find keys or values")
-      // TODO print missing values
-      System.exit(1)
-    }
+    require(tags.size == tagKUIDs.size && tags.filter(x => !tagVUIDs.contains(x._2)).isEmpty,
+      "Can't find keys or values")
+    // TODO print missing values
 
     val tagKV = joinTagKeysWithValues(tags, tagKUIDs, tagVUIDs)
 
-    val tsdb = read_tsdb_table(metricsUID, tagKV, startdate, enddate, sc)
+    val tsdb = read_tsdb_table(metricsUID, tagKV, startDate, endDate)
     val timeSeriesRDD: RDD[(Long, Float)] = decode_tsdb_table(tsdb)
 
     timeSeriesRDD
@@ -125,9 +125,13 @@ class SparkTSDBQuery(zkQuorum: String, zkClientPort: String) extends Serializabl
     timeSeriesRDD
   }
 
-  private def parseTags(tagKeyValueMap: String) =
-    if (tagKeyValueMap.trim != "*") tagKeyValueMap.split(",").map(_.split("->")).map(l => (l(0).trim, l(1).trim)).toMap
-    else Map[String, String]()
+  private def parseTags(tagKeyValueMap: String): Map[String, String] = {
+    if (tagKeyValueMap.trim != "*") {
+      tagKeyValueMap.split(",").map(_.split("->")).map(l => (l(0).trim, l(1).trim)).toMap
+    } else {
+      Map[String, String]()
+    }
+  }
 
   private def getMetricUID(tsdbUID: RDD[(ImmutableBytesWritable, Result)]): Array[Array[Byte]] = {
     val metricUIDs: Array[Array[Byte]] = tsdbUID
@@ -137,16 +141,23 @@ class SparkTSDBQuery(zkQuorum: String, zkClientPort: String) extends Serializabl
     metricUIDs
   }
 
-  private def getTagUIDs(tsdbUID: RDD[(ImmutableBytesWritable, Result)], qualifier: String): Map[String, Array[Byte]] = {
+  private def getTagUIDs(
+      tsdbUID: RDD[(ImmutableBytesWritable, Result)],
+      qualifier: String)
+    : Map[String, Array[Byte]] = {
     val tagkUIDs: Map[String, Array[Byte]] = tsdbUID
-      .map(l => (new String(l._1.copyBytes()), l._2.getValue("id".getBytes(), qualifier.getBytes())))
+      .map(l => (new String(l._1.copyBytes()),
+        l._2.getValue("id".getBytes(), qualifier.getBytes())))
       .filter(_._2 != null).collect.toMap
 
     tagkUIDs
   }
 
-  private def joinTagKeysWithValues(tags: Map[String, String], tagKUIDs: Map[String, Array[Byte]],
-                                    tagVUIDs: Map[String, Array[Byte]]): List[Array[Byte]] = {
+  private def joinTagKeysWithValues(
+      tags: Map[String, String],
+      tagKUIDs: Map[String, Array[Byte]],
+      tagVUIDs: Map[String, Array[Byte]])
+    : List[Array[Byte]] = {
 
     val tagkv: List[Array[Byte]] = tagKUIDs
       .map(k => (k._2, tagVUIDs(tags(k._1)))) // key(byte Array), value(byte Array)
@@ -157,8 +168,13 @@ class SparkTSDBQuery(zkQuorum: String, zkClientPort: String) extends Serializabl
     tagkv
   }
 
-  private def parseValues(qualifierBytes: Array[Byte], valueBytes: Array[Byte], basetime: Int, step: Int,
-                          getOffset: Int => Int, result: ArrayBuffer[(Long, Float)]) = {
+  private def parseValues(
+      qualifierBytes: Array[Byte],
+      valueBytes: Array[Byte],
+      basetime: Int,
+      step: Int,
+      getOffset: Int => Int,
+      result: ArrayBuffer[(Long, Float)]) = {
 
     var index = 0
     for (i <- 0 until qualifierBytes.length by step) {
@@ -175,18 +191,25 @@ class SparkTSDBQuery(zkQuorum: String, zkClientPort: String) extends Serializabl
     }
   }
 
-  private def parseValue(valueBytes: Array[Byte], index: Int, isFloat: Boolean, valueByteLength: Int): Float = {
+  private def parseValue(
+      valueBytes: Array[Byte],
+      index: Int,
+      isFloat: Boolean,
+      valueByteLength: Int)
+    : Float = {
     val bufferArr = ByteBuffer.wrap(Arrays.copyOfRange(valueBytes, index, index + valueByteLength))
     if (isFloat) {
       if (valueByteLength == 4) bufferArr.getFloat()
       else if (valueByteLength == 8) bufferArr.getDouble().toFloat
-      else throw new IllegalArgumentException(s"Can't parse Value (isFloat:$isFloat, valueByteLength:$valueByteLength")
+      else throw new IllegalArgumentException(
+        s"Can't parse Value (isFloat:$isFloat, valueByteLength:$valueByteLength")
     } else {
       if (valueByteLength == 1) valueBytes(index).toFloat
       else if (valueByteLength == 2) bufferArr.getShort.toFloat
       else if (valueByteLength == 4) bufferArr.getInt.toFloat
       else if (valueByteLength == 8) bufferArr.getLong.toFloat
-      else throw new IllegalArgumentException(s"Can't parse Value (isFloat:$isFloat, valueByteLength:$valueByteLength")
+      else throw new IllegalArgumentException(
+        s"Can't parse Value (isFloat:$isFloat, valueByteLength:$valueByteLength")
     }
   }
 
@@ -203,52 +226,61 @@ class SparkTSDBQuery(zkQuorum: String, zkClientPort: String) extends Serializabl
     ((firstByte >> 4) & 15) == 15 // first 4 bytes = 1111
   }
 
-  private def read_tsdbUID_table(metricName: String, tags: Map[String, String], sc: SparkContext):
-  RDD[(ImmutableBytesWritable, Result)] = {
+  private def read_tsdbUID_table(
+      metricName: String,
+      tags: Map[String, String])
+    : RDD[(ImmutableBytesWritable, Result)] = {
 
-    val config = tsdbuidConfig(zookeeperQuorum, zookeeperClientPort,
-      Array(metricName, tags.map(_._1).mkString("|"), tags.map(_._2).mkString("|")))
+    val config = tsdbuidConfig(Array(
+      metricName,
+      tags.map(_._1).mkString("|"),
+      tags.map(_._2).mkString("|")))
 
-    val tsdbUID = readTable(sc, config)
+    val tsdbUID = readTable(config)
 
     tsdbUID
   }
 
-  private def read_tsdb_table(metricsUID: Array[Array[Byte]], tagKV: List[Array[Byte]], startdate: String,
-                              enddate: String, sc: SparkContext): RDD[(ImmutableBytesWritable, Result)] = {
+  private def read_tsdb_table(
+      metricsUID: Array[Array[Byte]],
+      tagKV: List[Array[Byte]],
+      startdate: String,
+      enddate: String)
+    : RDD[(ImmutableBytesWritable, Result)] = {
 
-    val config = tsdbConfig(zookeeperQuorum, zookeeperClientPort, metricsUID.last,
+    val config = tsdbConfig(metricsUID.last,
       if (tagKV.size != 0) Option(tagKV.flatten.toArray) else None,
       if (startdate != "*") Option(startdate) else None,
       if (enddate != "*") Option(enddate) else None
     )
 
-    val tsdb = readTable(sc, config)
+    val tsdb = readTable(config)
     tsdb
   }
 
-  def readTable(sc: SparkContext, config: Configuration) = {
-    sc.newAPIHadoopRDD(
-      config,
-      classOf[TSDBInputFormat],
-      classOf[ImmutableBytesWritable],
-      classOf[Result])
+  def readTable(config: Configuration) = {
+    val tableName = config.get(TableInputFormat.INPUT_TABLE)
+    val scan = TSDBScan.createScan(config)
+    hBaseContext.hbaseRDD(TableName.valueOf(tableName), scan)
   }
 
   //Prepares the configuration for querying the TSDB-UID table and extracting UIDs for metrics and tags
-  private def tsdbuidConfig(zookeeperQuorum: String, zookeeperClientPort: String, columnQ: Array[String]) = {
-    val config = generalConfig(zookeeperQuorum, zookeeperClientPort)
+  private def tsdbuidConfig(columnQ: Array[String]) = {
+    val config = generalConfig()
     config.set(TableInputFormat.INPUT_TABLE, "tsdb-uid")
     config.set(TSDBScan.TSDB_UIDS, columnQ.mkString("|"))
     config
   }
 
   //Prepares the configuration for querying the TSDB table
-  private def tsdbConfig(zookeeperQuorum: String, zookeeperClientPort: String,
-                         metricUID: Array[Byte], tagkv: Option[Array[Byte]] = None,
-                         startdate: Option[String] = None, enddate: Option[String] = None): Configuration = {
+  private def tsdbConfig(
+      metricUID: Array[Byte],
+      tagkv: Option[Array[Byte]] = None,
+      startdate: Option[String] = None,
+      enddate: Option[String] = None)
+    : Configuration = {
 
-    val config = generalConfig(zookeeperQuorum, zookeeperClientPort)
+    val config = generalConfig()
     config.set(TableInputFormat.INPUT_TABLE, "tsdb")
 
     config.set(TSDBScan.METRICS, bytes2hex(metricUID))
@@ -256,21 +288,20 @@ class SparkTSDBQuery(zkQuorum: String, zkClientPort: String) extends Serializabl
       config.set(TSDBScan.TAGKV, bytes2hex(tagkv.get))
     }
 
-    if (startdate != None)
+    if (startdate != None) {
       config.set(TSDBScan.SCAN_TIMERANGE_START, getTime(startdate.get))
+    }
 
-    if (enddate != None)
+    if (enddate != None) {
       config.set(TSDBScan.SCAN_TIMERANGE_END, getTime(enddate.get))
+    }
 
     config
   }
 
-  private def generalConfig(zookeeperQuorum: String, zookeeperClientPort: String): Configuration = {
+  private def generalConfig(): Configuration = {
     //Create configuration
-    val config = HBaseConfiguration.create()
-    //config.addResource(System.getenv("HBASE_HOME") + "/conf/hbase-site.xml")
-    config.set("hbase.zookeeper.quorum", zookeeperQuorum)
-    config.set("hbase.zookeeper.property.clientPort", zookeeperClientPort)
+    val config = HBaseConfiguration.create(this.config)
     config.set("hbase.mapreduce.scan.column.family", "t")
     config
   }
